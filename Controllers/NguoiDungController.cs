@@ -104,5 +104,88 @@ namespace BookParadise.Controllers
                 });
         }
 
+        // Thêm class này vào file (có thể để dưới cùng)
+        public class LoginRequest
+        {
+            public string Email { get; set; }
+            public string MatKhau { get; set; }
+        }
+
+        // Thêm hàm này vào bên trong class NguoiDungController
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.MatKhau))
+            {
+                return BadRequest(new { message = "Vui lòng nhập đầy đủ email và mật khẩu." });
+            }
+
+            // Tìm user trong database có khớp email và mật khẩu không
+            var user = await _context.NguoiDungs
+                .FirstOrDefaultAsync(u => u.Email == request.Email && u.MatKhau == request.MatKhau);
+
+            if (user == null)
+            {
+                return Unauthorized(new { message = "Sai email hoặc mật khẩu!" });
+            }
+
+            // Nếu tài khoản bị khóa (HienThi = false)
+            if (!user.HienThi)
+            {
+                return BadRequest(new { message = "Tài khoản của bạn đã bị khóa." });
+            }
+
+            // Trả về dữ liệu user và một token (tạm thời dùng token giả, sau này nếu cần bảo mật cao hơn ta sẽ cài JWT)
+            return Ok(new
+            {
+                message = "Đăng nhập thành công",
+                token = "fake-jwt-token-bookparadise",
+                user = new
+                {
+                    id = user.MaNguoiDung,
+                    ten = user.HoTen,
+                    email = user.Email,
+                    // Thay vì gán cứng email, giờ ta lấy trực tiếp từ database
+                    role = user.VaiTro
+                }
+            });
+        }
+
+
+        // 1. API Lấy toàn bộ danh sách người dùng
+        [HttpGet("all")]
+        public async Task<IActionResult> GetAllUsers()
+        {
+            var users = await _context.NguoiDungs.ToListAsync();
+            return Ok(users);
+        }
+
+        // 2. API Xóa người dùng theo ID
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteUser(int id)
+        {
+            var user = await _context.NguoiDungs.FindAsync(id);
+            if (user == null) return NotFound(new { message = "Không tìm thấy người dùng." });
+
+            _context.NguoiDungs.Remove(user);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Đã xóa người dùng thành công." });
+        }
+
+        // Class phụ để nhận dữ liệu khi cập nhật quyền
+        public class UpdateRoleRequest { public string VaiTro { get; set; } }
+
+        // 3. API Cập nhật phân quyền
+        [HttpPut("{id}/role")]
+        public async Task<IActionResult> UpdateRole(int id, [FromBody] UpdateRoleRequest request)
+        {
+            var user = await _context.NguoiDungs.FindAsync(id);
+            if (user == null) return NotFound(new { message = "Không tìm thấy người dùng." });
+
+            user.VaiTro = request.VaiTro;
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Đã cập nhật quyền thành công." });
+        }
+
     }
 }

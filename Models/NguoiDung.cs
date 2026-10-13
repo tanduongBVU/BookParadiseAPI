@@ -19,6 +19,10 @@ namespace BookParadise.Models
         [Column("mat_khau")]
         public string MatKhau { get; set; } = string.Empty;
 
+        // Thêm đoạn này vào dưới cột HienThi
+        [Column("vai_tro")]
+        public string VaiTro { get; set; } = "Khach_Hang";
+
         [Column("trang_thai_ai")]
         public string TrangThaiAI { get; set; } = "Cho_Kiem_Duyet";
 
