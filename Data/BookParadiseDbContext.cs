@@ -20,5 +20,7 @@ namespace BookParadise.Data
         public DbSet<ChiTietDonHang> ChiTietDonHangs { get; set; }
 
         public DbSet<BinhLuan> BinhLuans { get; set; }
+
+        public DbSet<SachYeuThich> SachYeuThiches { get; set; }
     }
 }
