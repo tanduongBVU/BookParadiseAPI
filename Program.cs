@@ -1,6 +1,10 @@
 using BookParadise.Data;
 using Microsoft.EntityFrameworkCore;
 
+
+// THÊM DÒNG NÀY ĐỂ FIX LỖI DATETIME CỦA POSTGRESQL
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<BookParadiseDbContext>(options =>
     options.UseNpgsql(
@@ -39,6 +43,8 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 // Thêm vào sau app.Build(); và trước app.UseAuthorization();
+app.UseStaticFiles();
+
 app.UseCors("AllowReactApp");
 
 app.UseAuthorization();

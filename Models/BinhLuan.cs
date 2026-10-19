@@ -28,5 +28,9 @@ namespace BookParadise.Models
 
         [Column("hien_thi")]
         public bool HienThi { get; set; } = true;
+
+        // Thêm đoạn này để nối với bảng NguoiDung
+        [ForeignKey("MaNguoiDung")]
+        public NguoiDung? NguoiDung { get; set; }
     }
 }
