@@ -25,5 +25,15 @@ namespace BookParadise.Models
 
         [Column("hien_thi")]
         public bool HienThi { get; set; } = true;
+
+        [Column("ma_code")]
+        public string? MaCode { get; set; }
+
+        [Column("so_tien_giam")]
+        public decimal SoTienGiam { get; set; }
+
+        // Thêm cột này để quản lý trạng thái giao hàng độc lập với AI
+        [Column("trang_thai_don_hang")]
+        public string TrangThaiDonHang { get; set; } = "Cho_Xac_Nhan";
     }
 }
