@@ -30,5 +30,7 @@ namespace BookParadise.Data
         public DbSet<LienHe> LienHes { get; set; }
 
         public DbSet<MaGiamGia> MaGiamGias { get; set; }
+
+        public DbSet<SecurityEvent> SecurityEvents { get; set; }
     }
 }

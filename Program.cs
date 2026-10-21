@@ -1,6 +1,6 @@
 using BookParadise.Data;
 using Microsoft.EntityFrameworkCore;
-
+using BookParadise.Middleware;
 
 // THÊM DÒNG NÀY ĐỂ FIX LỖI DATETIME CỦA POSTGRESQL
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
@@ -48,6 +48,11 @@ app.UseStaticFiles();
 app.UseCors("AllowReactApp");
 
 app.UseAuthorization();
+
+
+// Theo dõi request bằng middleware riêng.
+app.UseMiddleware<RequestBurstMiddleware>();
+
 
 app.MapControllers();
 

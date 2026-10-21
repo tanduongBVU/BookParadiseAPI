@@ -2,6 +2,8 @@
 using BookParadise.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Http;
 
 namespace BookParadise.Controllers
 {
@@ -10,6 +12,61 @@ namespace BookParadise.Controllers
     {
         private readonly BookParadiseDbContext _context;
         public BinhLuanController(BookParadiseDbContext context) => _context = context;
+
+        //Thêm hàm kiểm tra đầu vào trong phan AI baor mật
+
+        private static bool CoDauHieuDangNgo(string? noiDung)
+        {
+            if (string.IsNullOrWhiteSpace(noiDung))
+                return false;
+
+            string[] mauDangNgo =
+            {
+                // SQL Injection: dieu kien OR/AND co dang so sanh
+                @"(?i)\bOR\s+['""]?\w+['""]?\s*=\s*['""]?\w+['""]?",
+                @"(?i)\bAND\s+['""]?\w+['""]?\s*=\s*['""]?\w+['""]?",
+
+                // SQL Injection: cac cau lenh SQL dang ngo
+                @"(?i)\bUNION\s+SELECT\b",
+                @"(?i)\bDROP\s+TABLE\b",
+                @"(?i)\bINSERT\s+INTO\b",
+                @"(?i)\bDELETE\s+FROM\b",
+                @"(?i)\bUPDATE\s+\w+\s+SET\b",
+
+                // SQL Injection: comment SQL ket hop voi dau hieu SQL
+                @"(?i)(?:--|/\*|\*/|#)\s*(?:$|\b(?:OR|AND|UNION|SELECT|DROP|INSERT|DELETE|UPDATE)\b)",
+
+                // XSS: the script va giao thuc JavaScript
+                @"(?i)<\s*script\b",
+                @"(?i)javascript\s*:",
+                @"(?i)\bonerror\s*=",
+                @"(?i)\bonload\s*=",
+                @"(?i)<\s*iframe\b",
+                @"(?i)<\s*svg\b[^>]*\bonload\s*="
+            };
+
+            foreach (string mau in mauDangNgo)
+            {
+                if (Regex.IsMatch(noiDung, mau))
+                    return true;
+            }
+
+            return false;
+        }
+
+
+        private string LayDiaChiIP()
+        {
+            string? ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+            if (string.IsNullOrWhiteSpace(ip))
+                return "127.0.0.1";
+
+            if (ip == "::1")
+                return "127.0.0.1";
+
+            return ip;
+        }
 
         // 1. DÀNH CHO KHÁCH HÀNG: Lấy bình luận CỦA 1 SẢN PHẨM (Chỉ lấy những cái Đã Duyệt)
         [HttpGet("api/sach/{maSach}/binhluan")]
@@ -31,15 +88,55 @@ namespace BookParadise.Controllers
 
         // 2. DÀNH CHO KHÁCH HÀNG: Gửi bình luận mới
         [HttpPost("api/binhluan")]
-        public async Task<IActionResult> CreateComment([FromBody] BinhLuan binhLuan)
+        public async Task<IActionResult> CreateComment(
+    [FromBody] BinhLuan binhLuan)
         {
+            if (binhLuan == null ||
+                string.IsNullOrWhiteSpace(binhLuan.NoiDung))
+            {
+                return BadRequest(new
+                {
+                    message = "Nội dung bình luận không được để trống."
+                });
+            }
+
             binhLuan.NgayBinhLuan = DateTime.Now;
-            binhLuan.TrangThaiAI = "Cho_Kiem_Duyet"; // Mặc định phải chờ Admin duyệt
+            binhLuan.TrangThaiAI = "Cho_Kiem_Duyet";
             binhLuan.HienThi = true;
 
+            bool dauVaoDangNgo = CoDauHieuDangNgo(binhLuan.NoiDung);
+
+            // Lưu bình luận theo cơ chế kiểm duyệt hiện tại.
             _context.BinhLuans.Add(binhLuan);
             await _context.SaveChangesAsync();
-            return Ok(new { message = "Đã gửi bình luận. Vui lòng chờ Admin kiểm duyệt!" });
+
+            // Nếu phát hiện mẫu đáng ngờ, ghi sự kiện cho AI xử lý.
+            if (dauVaoDangNgo)
+            {
+                var suKien = new SecurityEvent
+                {
+                    EventType = "suspicious_input",
+                    SourceIp = LayDiaChiIP(),
+                    Description =
+                        $"Phat hien mau dau vao dang ngo trong binh luan. " +
+                        $"Ma binh luan: {binhLuan.MaBinhLuan}.",
+                    RiskScore = 0,
+                    Severity = "Info",
+                    DetectionStatus = "Pending",
+                    ReviewStatus = "New",
+                    IsSimulated = false,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                _context.SecurityEvents.Add(suKien);
+                await _context.SaveChangesAsync();
+            }
+
+            return Ok(new
+            {
+                message = "Đã gửi bình luận. Vui lòng chờ Admin kiểm duyệt!",
+                suspiciousInput = dauVaoDangNgo
+            });
         }
 
         // 3. DÀNH CHO ADMIN: Lấy tất cả bình luận để quản lý

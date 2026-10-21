@@ -111,6 +111,48 @@ namespace BookParadise.Controllers
             public string MatKhau { get; set; }
         }
 
+        //Thêm hàm ghi nhận sự kiện spam đăng nhập thất bại
+        private async Task GhiNhanSuKienDangNhapThatBai()
+        {
+            var ip = HttpContext.Connection.RemoteIpAddress?.ToString()
+                     ?? "127.0.0.1";
+
+            // Chuẩn hóa địa chỉ IPv4 khi request dùng IPv4-mapped IPv6.
+            if (HttpContext.Connection.RemoteIpAddress?.IsIPv4MappedToIPv6 == true)
+            {
+                ip = HttpContext.Connection.RemoteIpAddress
+                    .MapToIPv4()
+                    .ToString();
+            }
+
+            var suKien = new SecurityEvent
+            {
+                EventType = "login_failed",
+                SourceIp = ip,
+                Description = "Đăng nhập thất bại trên website.",
+                RiskScore = 0,
+                Severity = "Info",
+                DetectionStatus = "Pending",
+                ReviewStatus = "New",
+                IsSimulated = false,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _context.SecurityEvents.Add(suKien);
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                // Nếu ghi log lỗi, không làm lộ thông tin nội bộ ra phía người dùng.
+                _context.Entry(suKien).State = EntityState.Detached;
+                Console.Error.WriteLine(
+                    $"Không ghi được sự kiện bảo mật: {ex.Message}");
+            }
+        }
+
         // Thêm hàm này vào bên trong class NguoiDungController
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
@@ -126,7 +168,12 @@ namespace BookParadise.Controllers
 
             if (user == null)
             {
-                return Unauthorized(new { message = "Sai email hoặc mật khẩu!" });
+                await GhiNhanSuKienDangNhapThatBai();
+
+                return Unauthorized(new
+                {
+                    message = "Sai email hoặc mật khẩu!"
+                });
             }
 
             // Nếu tài khoản bị khóa (HienThi = false)

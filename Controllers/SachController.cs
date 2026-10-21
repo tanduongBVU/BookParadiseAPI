@@ -3,6 +3,11 @@ using BookParadise.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
+using System.Diagnostics;
+using System.Net;
+using Microsoft.AspNetCore.Hosting;
+
+
 namespace BookParadise.Controllers
 {
     [ApiController]
@@ -10,10 +15,14 @@ namespace BookParadise.Controllers
     public class SachController : ControllerBase
     {
         private readonly BookParadiseDbContext _context;
+        private readonly IWebHostEnvironment _environment;
 
-        public SachController(BookParadiseDbContext context)
+        public SachController(
+            BookParadiseDbContext context,
+            IWebHostEnvironment environment)
         {
             _context = context;
+            _environment = environment;
         }
 
         [HttpGet]
@@ -90,5 +99,114 @@ namespace BookParadise.Controllers
 
             return Ok(sach);
         }
+
+
+
+        [HttpGet("search")]
+        public async Task<IActionResult> Search(
+            [FromQuery] string keyword,
+            [FromQuery] bool simulateSlow = false)
+        {
+            if (string.IsNullOrWhiteSpace(keyword))
+            {
+                return BadRequest(new
+                {
+                    message = "Vui lòng nhập từ khóa tìm kiếm."
+                });
+            }
+
+            var tuKhoa = keyword.Trim();
+            var stopwatch = Stopwatch.StartNew();
+
+            try
+            {
+                // Chỉ mô phỏng độ trễ khi chủ động truyền
+                // simulateSlow=true trong môi trường Development.
+                if (simulateSlow && _environment.IsDevelopment())
+                {
+                    await using var command =
+                        _context.Database.GetDbConnection().CreateCommand();
+
+                    command.CommandText = "SELECT pg_sleep(2.5)";
+
+                    if (command.Connection!.State !=
+                        System.Data.ConnectionState.Open)
+                    {
+                        await command.Connection.OpenAsync();
+                    }
+
+                    await command.ExecuteNonQueryAsync();
+                }
+
+                // Đo thời gian xử lý truy vấn tìm kiếm thực tế.
+                var danhSachSach = await _context.Sachs
+                    .AsNoTracking()
+                    .Where(s => s.TenSach.Contains(tuKhoa))
+                    .Take(50)
+                    .ToListAsync();
+
+                stopwatch.Stop();
+
+                var thoiGianMs = stopwatch.ElapsedMilliseconds;
+                var timKiemCham = thoiGianMs > 2000;
+
+                // Chỉ ghi sự kiện khi thời gian xử lý vượt 2 giây.
+                if (timKiemCham)
+                {
+                    var ip = HttpContext.Connection.RemoteIpAddress;
+
+                    var diaChiIP = ip == null
+                        ? "Unknown"
+                        : ip.IsIPv4MappedToIPv6
+                            ? ip.MapToIPv4().ToString()
+                            : ip.ToString();
+
+                    if (diaChiIP == "::1")
+                    {
+                        diaChiIP = "127.0.0.1";
+                    }
+
+                    var suKien = new SecurityEvent
+                    {
+                        EventType = "slow_search",
+                        SourceIp = diaChiIP,
+                        Description =
+                            $"Tìm kiếm sách mất {thoiGianMs} ms, " +
+                            $"từ khóa: {tuKhoa}.",
+                        RiskScore = 0,
+                        Severity = "Info",
+                        DetectionStatus = "Pending",
+                        ReviewStatus = "New",
+                        IsSimulated =
+                            simulateSlow && _environment.IsDevelopment(),
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    _context.Set<SecurityEvent>().Add(suKien);
+                    await _context.SaveChangesAsync();
+                }
+
+                return Ok(new
+                {
+                    keyword = tuKhoa,
+                    elapsedMilliseconds = thoiGianMs,
+                    slowSearch = timKiemCham,
+                    data = danhSachSach
+                });
+            }
+            catch (Exception ex)
+            {
+                // Ghi lỗi để dễ tìm nguyên nhân trong terminal Backend.
+                Console.WriteLine(
+                    $"[SEARCH ERROR] {ex.Message}");
+
+                return StatusCode(500, new
+                {
+                    message = "Đã xảy ra lỗi khi tìm kiếm sách."
+                });
+            }
+        }
+
+
     }
 }
