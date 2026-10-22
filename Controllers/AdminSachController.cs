@@ -29,8 +29,15 @@ namespace BookParadise.Controllers
         [HttpPost]
         public async Task<IActionResult> Create(Sach sach)
         {
+            sach.MaSach = 0;
+
+            // Sách mới chờ AI kiểm tra.
+            sach.TrangThaiAI = "Cho_Kiem_Duyet";
+            sach.HienThi = false;
+
             _context.Sachs.Add(sach);
             await _context.SaveChangesAsync();
+
             return Ok(sach);
         }
 

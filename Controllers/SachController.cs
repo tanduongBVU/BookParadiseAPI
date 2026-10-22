@@ -28,7 +28,9 @@ namespace BookParadise.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
-            var danhSachSach = await _context.Sachs.ToListAsync();
+            var danhSachSach = await _context.Sachs
+                .Where(s => s.HienThi)
+                .ToListAsync();
 
             return Ok(danhSachSach);
         }
@@ -42,28 +44,32 @@ namespace BookParadise.Controllers
 
             // 2. Sách mới phát hành (Lấy 8 cuốn có ID lớn nhất - mới thêm vào)
             var sachMoi = await _context.Sachs
-                .OrderByDescending(s => s.MaSach)
-                .Take(8)
-                .ToListAsync();
+            .Where(s => s.HienThi)
+            .OrderByDescending(s => s.MaSach)
+            .Take(8)
+            .ToListAsync();
 
             // 3. Sách khuyến mãi (Những sách được bật cờ HienThiTrangSale)
             var sachKhuyenMai = await _context.Sachs
-                .Where(s => s.HienThiTrangSale)
-                .Take(8)
-                .ToListAsync();
+            .Where(s => s.HienThi && s.HienThiTrangSale)
+            .Take(8)
+            .ToListAsync();
 
             // 4. Sách bán chạy (Tính tổng số lượng bán từ Chi tiết đơn hàng)
-            var sachBanChay = await (from s in _context.Sachs
-                                     join ct in _context.ChiTietDonHangs on s.MaSach equals ct.MaSach into g
-                                     select new
-                                     {
-                                         Sach = s,
-                                         SoLuongBan = g.Sum(x => x.SoLuong)
-                                     })
-                                     .OrderByDescending(x => x.SoLuongBan)
-                                     .Select(x => x.Sach)
-                                     .Take(8)
-                                     .ToListAsync();
+            var sachBanChay = await (
+            from s in _context.Sachs
+            where s.HienThi
+            join ct in _context.ChiTietDonHangs
+                on s.MaSach equals ct.MaSach into g
+            select new
+            {
+                Sach = s,
+                SoLuongBan = g.Sum(x => x.SoLuong)
+            })
+            .OrderByDescending(x => x.SoLuongBan)
+            .Select(x => x.Sach)
+            .Take(8)
+            .ToListAsync();
 
             // Trả về 1 cục JSON duy nhất chứa cả 4 danh sách
             return Ok(new
@@ -79,8 +85,9 @@ namespace BookParadise.Controllers
         public async Task<IActionResult> GetById(int id)
         {
             var sach = await _context.Sachs
-                .Include(x => x.CacBienThe)
-                .FirstOrDefaultAsync(x => x.MaSach == id);
+            .Where(s => s.HienThi)
+            .Include(s => s.CacBienThe)
+            .FirstOrDefaultAsync(s => s.MaSach == id);
 
             if (sach == null)
             {
@@ -140,10 +147,10 @@ namespace BookParadise.Controllers
 
                 // Đo thời gian xử lý truy vấn tìm kiếm thực tế.
                 var danhSachSach = await _context.Sachs
-                    .AsNoTracking()
-                    .Where(s => s.TenSach.Contains(tuKhoa))
-                    .Take(50)
-                    .ToListAsync();
+                .AsNoTracking()
+                .Where(s => s.HienThi && s.TenSach.Contains(tuKhoa))
+                .Take(50)
+                .ToListAsync();
 
                 stopwatch.Stop();
 
