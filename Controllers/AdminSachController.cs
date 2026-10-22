@@ -50,15 +50,72 @@ namespace BookParadise.Controllers
             return NoContent();
         }
 
+
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
-            var sach = await _context.Sachs.FindAsync(id);
-            if (sach == null) return NotFound();
-            _context.Sachs.Remove(sach);
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Đã xóa sách" });
+            var sach = await _context.Sachs
+                .FirstOrDefaultAsync(s => s.MaSach == id);
+
+            if (sach == null)
+            {
+                return NotFound(new
+                {
+                    message = $"Không tìm thấy sách có mã {id}."
+                });
+            }
+
+            // Kiểm tra sách đã được mua chưa.
+            bool daDuocMua = await _context.ChiTietDonHangs
+                .AnyAsync(ct => ct.MaSach == id);
+
+            // Kiểm tra sách đã có bình luận chưa.
+            bool daCoBinhLuan = await _context.BinhLuans
+                .AnyAsync(bl => bl.MaSach == id);
+
+            // Nếu có dữ liệu liên quan thì ẩn, không xóa cứng.
+            if (daDuocMua || daCoBinhLuan)
+            {
+                sach.HienThi = false;
+
+                await _context.SaveChangesAsync();
+
+                string lyDo = "";
+
+                if (daDuocMua && daCoBinhLuan)
+                    lyDo = "Sách đã được mua và có bình luận.";
+                else if (daDuocMua)
+                    lyDo = "Sách đã được mua.";
+                else
+                    lyDo = "Sách đã có bình luận.";
+
+                return Ok(new
+                {
+                    message = lyDo +
+                        " Hệ thống đã ẩn sách thay vì xóa để bảo vệ dữ liệu liên quan.",
+                    hienThi = false
+                });
+            }
+
+            try
+            {
+                _context.Sachs.Remove(sach);
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    message = "Đã xóa sách thành công."
+                });
+            }
+            catch (DbUpdateException)
+            {
+                return Conflict(new
+                {
+                    message = "Không thể xóa sách vì đang được dữ liệu khác tham chiếu."
+                });
+            }
         }
+
 
         [HttpPatch("{id}/toggle-sale")]
         public async Task<IActionResult> ToggleSale(int id)
