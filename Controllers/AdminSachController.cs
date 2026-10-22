@@ -45,9 +45,39 @@ namespace BookParadise.Controllers
         public async Task<IActionResult> Update(int id, Sach sach)
         {
             if (id != sach.MaSach) return BadRequest();
+
+            // Tự động chuyển về trạng thái chờ AI duyệt lại khi có chỉnh sửa (VD: sửa giá hợp lệ)
+            sach.TrangThaiAI = "Cho_Kiem_Duyet";
+            sach.HienThi = false; // Tạm ẩn chờ AI xác nhận
+
             _context.Entry(sach).State = EntityState.Modified;
             await _context.SaveChangesAsync();
             return NoContent();
+        }
+
+        // THÊM MỚI API NÀY ĐỂ XỬ LÝ NÚT MỞ ẨN / TẮT ẨN THỦ CÔNG TRÊN UI
+        [HttpPatch("{id}/toggle-visibility")]
+        public async Task<IActionResult> ToggleVisibility(int id)
+        {
+            var sach = await _context.Sachs.FindAsync(id);
+            if (sach == null) return NotFound();
+
+            // Đảo ngược trạng thái hiển thị
+            sach.HienThi = !sach.HienThi;
+
+            // Nếu người dùng chủ động mở ẩn thủ công -> Chuyển trạng thái sang Hợp lệ
+            if (sach.HienThi)
+            {
+                sach.TrangThaiAI = "Hop_Le";
+            }
+            else
+            {
+                sach.TrangThaiAI = "Da_An_Thu_Cong";
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Cập nhật hiển thị thành công", hienThi = sach.HienThi });
         }
 
 
