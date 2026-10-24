@@ -97,10 +97,48 @@ namespace BookParadise.Controllers
                 reviewStatus = securityEvent.ReviewStatus
             });
         }
+
+
+        // API "UỐNG THUỐC GIẢI" - TẠO INDEX ĐỂ TỐI ƯU CSDL
+        [HttpPost("fix-index")]
+        public async Task<IActionResult> FixIndex()
+        {
+            try
+            {
+                // 1. Tạo extension pg_trgm (Hỗ trợ tìm kiếm tiếng Việt cực mạnh)
+                await _context.Database.ExecuteSqlRawAsync("CREATE EXTENSION IF NOT EXISTS pg_trgm;");
+
+                // 2. Tạo Index GIN trên cột ten_sach để tối ưu lệnh LIKE
+                await _context.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS idx_sach_tensach ON quan_ly_ban_sach.sach USING GIN (ten_sach gin_trgm_ops);");
+
+                return Ok(new { message = "Đã tạo Index thành công! Hãy ra trang chủ tìm kiếm lại để thấy sự khác biệt." });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Lỗi khi tạo Index: " + ex.Message });
+            }
+        }
+
+        // (TÙY CHỌN DÀNH CHO ADMIN) API HỦY INDEX ĐỂ DEMO LẠI TỪ ĐẦU
+        [HttpDelete("remove-index")]
+        public async Task<IActionResult> RemoveIndex()
+        {
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS quan_ly_ban_sach.idx_sach_tensach;");
+                return Ok(new { message = "Đã xóa Index. CSDL đã quay về trạng thái quét chậm." });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Lỗi khi xóa Index: " + ex.Message });
+            }
+        }
     }
 
     public class UpdateReviewStatusRequest
     {
         public string ReviewStatus { get; set; } = string.Empty;
     }
+
+
 }

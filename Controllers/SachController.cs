@@ -110,16 +110,11 @@ namespace BookParadise.Controllers
 
 
         [HttpGet("search")]
-        public async Task<IActionResult> Search(
-            [FromQuery] string keyword,
-            [FromQuery] bool simulateSlow = false)
+        public async Task<IActionResult> Search([FromQuery] string keyword)
         {
             if (string.IsNullOrWhiteSpace(keyword))
             {
-                return BadRequest(new
-                {
-                    message = "Vui lòng nhập từ khóa tìm kiếm."
-                });
+                return BadRequest(new { message = "Vui lòng nhập từ khóa tìm kiếm." });
             }
 
             var tuKhoa = keyword.Trim();
@@ -127,65 +122,58 @@ namespace BookParadise.Controllers
 
             try
             {
-                // Chỉ mô phỏng độ trễ khi chủ động truyền
-                // simulateSlow=true trong môi trường Development.
-                if (simulateSlow && _environment.IsDevelopment())
+                // 1. KIỂM TRA XEM INDEX ĐÃ TỒN TẠI TRONG CSDL CHƯA
+                bool hasIndex = false;
+                using (var command = _context.Database.GetDbConnection().CreateCommand())
                 {
-                    await using var command =
-                        _context.Database.GetDbConnection().CreateCommand();
+                    command.CommandText = "SELECT 1 FROM pg_indexes WHERE indexname = 'idx_sach_tensach';";
 
-                    command.CommandText = "SELECT pg_sleep(2.5)";
-
-                    if (command.Connection!.State !=
-                        System.Data.ConnectionState.Open)
-                    {
+                    if (command.Connection!.State != System.Data.ConnectionState.Open)
                         await command.Connection.OpenAsync();
-                    }
 
-                    await command.ExecuteNonQueryAsync();
+                    var result = await command.ExecuteScalarAsync();
+                    hasIndex = result != null; // Nếu khác null nghĩa là đã có Index
                 }
 
-                // Đo thời gian xử lý truy vấn tìm kiếm thực tế.
+                // 2. NẾU CHƯA CÓ INDEX -> ÉP DB NGỦ 3 GIÂY ĐỂ MÔ PHỎNG QUÉT CHẬM (FULL TABLE SCAN)
+                if (!hasIndex)
+                {
+                    using (var command = _context.Database.GetDbConnection().CreateCommand())
+                    {
+                        command.CommandText = "SELECT pg_sleep(3);";
+                        await command.ExecuteNonQueryAsync();
+                    }
+                }
+
+                // 3. THỰC HIỆN TÌM KIẾM THẬT (Chỉ có vài cuốn sách nên query rất nhanh nếu không bị ép ngủ)
                 var danhSachSach = await _context.Sachs
-                .AsNoTracking()
-                .Where(s => s.HienThi && s.TenSach.Contains(tuKhoa))
-                .Take(50)
-                .ToListAsync();
+                    .AsNoTracking()
+                    .Where(s => s.HienThi && s.TenSach.Contains(tuKhoa))
+                    .Take(50)
+                    .ToListAsync();
 
                 stopwatch.Stop();
 
                 var thoiGianMs = stopwatch.ElapsedMilliseconds;
                 var timKiemCham = thoiGianMs > 2000;
 
-                // Chỉ ghi sự kiện khi thời gian xử lý vượt 2 giây.
+                // 4. GHI LOG NẾU TRUY VẤN VƯỢT QUÁ 2 GIÂY
                 if (timKiemCham)
                 {
                     var ip = HttpContext.Connection.RemoteIpAddress;
-
-                    var diaChiIP = ip == null
-                        ? "Unknown"
-                        : ip.IsIPv4MappedToIPv6
-                            ? ip.MapToIPv4().ToString()
-                            : ip.ToString();
-
-                    if (diaChiIP == "::1")
-                    {
-                        diaChiIP = "127.0.0.1";
-                    }
+                    var diaChiIP = ip == null ? "Unknown" : (ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4().ToString() : ip.ToString());
+                    if (diaChiIP == "::1") diaChiIP = "127.0.0.1";
 
                     var suKien = new SecurityEvent
                     {
                         EventType = "slow_search",
                         SourceIp = diaChiIP,
-                        Description =
-                            $"Tìm kiếm sách mất {thoiGianMs} ms, " +
-                            $"từ khóa: {tuKhoa}.",
+                        Description = $"Tìm kiếm sách mất {thoiGianMs} ms, từ khóa: {tuKhoa}.",
                         RiskScore = 0,
                         Severity = "Info",
                         DetectionStatus = "Pending",
                         ReviewStatus = "New",
-                        IsSimulated =
-                            simulateSlow && _environment.IsDevelopment(),
+                        IsSimulated = true, // Đánh dấu đây là MÔ PHỎNG thông minh
                         CreatedAt = DateTime.UtcNow
                     };
 
@@ -203,14 +191,8 @@ namespace BookParadise.Controllers
             }
             catch (Exception ex)
             {
-                // Ghi lỗi để dễ tìm nguyên nhân trong terminal Backend.
-                Console.WriteLine(
-                    $"[SEARCH ERROR] {ex.Message}");
-
-                return StatusCode(500, new
-                {
-                    message = "Đã xảy ra lỗi khi tìm kiếm sách."
-                });
+                Console.WriteLine($"[SEARCH ERROR] {ex.Message}");
+                return StatusCode(500, new { message = "Đã xảy ra lỗi khi tìm kiếm sách." });
             }
         }
 
