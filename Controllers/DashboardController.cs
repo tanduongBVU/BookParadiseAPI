@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using static BookParadise.Data.BookParadiseDbContext;
 
 namespace BookParadise.Controllers
 {
@@ -17,20 +18,31 @@ namespace BookParadise.Controllers
         [HttpGet("summary")]
         public async Task<IActionResult> GetSummary()
         {
-            var today = DateTime.UtcNow;
+            var today = DateTime.UtcNow.Date;
             var sevenDaysAgo = today.AddDays(-7);
             var fourteenDaysAgo = today.AddDays(-14);
             var thirtyDaysAgo = today.AddDays(-30);
 
-            // 1. Doanh thu (Chỉ tính các đơn không bị hủy)
-            var doanhThu7Ngay = await _context.DonHangs.Where(d => d.NgayDat >= sevenDaysAgo && d.TrangThaiAI != "Đã hủy").SumAsync(d => (decimal?)d.TongTien) ?? 0;
-            var doanhThu14Ngay = await _context.DonHangs.Where(d => d.NgayDat >= fourteenDaysAgo && d.TrangThaiAI != "Đã hủy").SumAsync(d => (decimal?)d.TongTien) ?? 0;
-            var doanhThu30Ngay = await _context.DonHangs.Where(d => d.NgayDat >= thirtyDaysAgo && d.TrangThaiAI != "Đã hủy").SumAsync(d => (decimal?)d.TongTien) ?? 0;
+            // 1. Doanh thu (ĐỌC TỪ MATERIALIZED VIEW thay vì query hàm SUM lên bảng gốc)
+            var doanhThu7Ngay = await _context.MvDoanhThuNgays
+                .Where(m => m.Ngay >= sevenDaysAgo)
+                .SumAsync(m => (decimal?)m.TongDoanhThu) ?? 0;
+
+            var doanhThu14Ngay = await _context.MvDoanhThuNgays
+                .Where(m => m.Ngay >= fourteenDaysAgo)
+                .SumAsync(m => (decimal?)m.TongDoanhThu) ?? 0;
+
+            var doanhThu30Ngay = await _context.MvDoanhThuNgays
+                .Where(m => m.Ngay >= thirtyDaysAgo)
+                .SumAsync(m => (decimal?)m.TongDoanhThu) ?? 0;
+
+            // Đọc thời gian cập nhật cuối cùng
+            var log = await _context.ThongKeLogs.OrderByDescending(l => l.Id).FirstOrDefaultAsync();
+            var lanCapNhatCuoi = log != null ? log.LanCapNhatCuoi : DateTime.UtcNow;
 
             // 2. Doanh thu theo danh mục
             var doanhThuTheoDanhMuc = await (from ct in _context.ChiTietDonHangs
                                              join s in _context.Sachs on ct.MaSach equals s.MaSach
-                                             // Lưu ý: Nếu báo lỗi CS1061 ở đây, đổi _context.LoaiSachs thành _context.LoaiSach
                                              join l in _context.LoaiSachs on s.MaLoai equals l.MaLoai
                                              join d in _context.DonHangs on ct.MaDonHang equals d.MaDonHang
                                              where d.TrangThaiAI != "Đã hủy"
@@ -77,8 +89,8 @@ namespace BookParadise.Controllers
                                             TrangThai = d.TrangThaiAI
                                         }).Take(5).ToListAsync();
 
-            // 5. Sản phẩm sắp hết hàng (Dưới 10 cuốn)
-            var sapHetHang = await _context.Sachs 
+            // 5. Sản phẩm sắp hết hàng
+            var sapHetHang = await _context.Sachs
                 .Where(s => s.SoLuong > 0 && s.SoLuong <= 10)
                 .OrderBy(s => s.SoLuong)
                 .Select(s => new { s.TenSach, s.SoLuong })
@@ -86,6 +98,7 @@ namespace BookParadise.Controllers
 
             return Ok(new
             {
+                lanCapNhatCuoi,
                 doanhThu = new { ngay7 = doanhThu7Ngay, ngay14 = doanhThu14Ngay, ngay30 = doanhThu30Ngay },
                 doanhThuTheoDanhMuc,
                 banChay,
@@ -93,6 +106,37 @@ namespace BookParadise.Controllers
                 donHangGanNhat,
                 sapHetHang
             });
+        }
+
+        // API LÀM MỚI MATERIALIZED VIEW KHI BẤM NÚT
+        [HttpPost("refresh")]
+        public async Task<IActionResult> RefreshMaterializedView()
+        {
+            try
+            {
+                // Bắt PostgreSQL tính toán lại bảng ảo
+                await _context.Database.ExecuteSqlRawAsync("REFRESH MATERIALIZED VIEW quan_ly_ban_sach.mv_doanh_thu_ngay;");
+
+                // Cập nhật lại thời gian trong bảng Log
+                var log = await _context.ThongKeLogs.OrderByDescending(l => l.Id).FirstOrDefaultAsync();
+                if (log == null)
+                {
+                    log = new ThongKeLog { LanCapNhatCuoi = DateTime.UtcNow };
+                    _context.ThongKeLogs.Add(log);
+                }
+                else
+                {
+                    log.LanCapNhatCuoi = DateTime.UtcNow;
+                }
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Làm mới dữ liệu thành công", lastUpdated = log.LanCapNhatCuoi });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Lỗi khi làm mới dữ liệu: " + ex.Message });
+            }
         }
     }
 }
