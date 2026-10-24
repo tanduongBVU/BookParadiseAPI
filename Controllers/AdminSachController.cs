@@ -36,7 +36,10 @@ namespace BookParadise.Controllers
             sach.HienThi = false;
 
             _context.Sachs.Add(sach);
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(); // Lưu xong EF Core sẽ tự cấp MaSach
+
+            // GỌI LỆNH ĐÁNH THỨC PYTHON AI TRỰC TIẾP TỪ C#
+            await _context.Database.ExecuteSqlRawAsync($"NOTIFY kenh_sach, '{sach.MaSach}';");
 
             return Ok(sach);
         }
@@ -46,12 +49,16 @@ namespace BookParadise.Controllers
         {
             if (id != sach.MaSach) return BadRequest();
 
-            // Tự động chuyển về trạng thái chờ AI duyệt lại khi có chỉnh sửa (VD: sửa giá hợp lệ)
+            // Tự động chuyển về trạng thái chờ AI duyệt lại khi có chỉnh sửa
             sach.TrangThaiAI = "Cho_Kiem_Duyet";
             sach.HienThi = false; // Tạm ẩn chờ AI xác nhận
 
             _context.Entry(sach).State = EntityState.Modified;
             await _context.SaveChangesAsync();
+
+            // GỌI LỆNH ĐÁNH THỨC PYTHON AI TRỰC TIẾP TỪ C#
+            await _context.Database.ExecuteSqlRawAsync($"NOTIFY kenh_sach, '{sach.MaSach}';");
+
             return NoContent();
         }
 
@@ -62,16 +69,33 @@ namespace BookParadise.Controllers
             var sach = await _context.Sachs.FindAsync(id);
             if (sach == null) return NotFound();
 
-            // Đảo ngược trạng thái hiển thị
-            sach.HienThi = !sach.HienThi;
-
-            // Nếu người dùng chủ động mở ẩn thủ công -> Chuyển trạng thái sang Hợp lệ
-            if (sach.HienThi)
+            // Nếu người dùng đang muốn MỞ hiển thị (hiện tại HienThi đang là false)
+            if (!sach.HienThi)
             {
+                // Chốt chặn 1: Không cho phép giá âm
+                if (sach.Gia < 0)
+                {
+                    return BadRequest(new { message = "Không thể hiển thị: Sản phẩm đang có giá âm!" });
+                }
+
+                // Chốt chặn 2: Không cho phép ký tự rác
+                string[] kyTuRac = { "@", "#", "$", "%", "^", "&", "*" };
+                foreach (var kyTu in kyTuRac)
+                {
+                    if (sach.TenSach.Contains(kyTu))
+                    {
+                        return BadRequest(new { message = $"Không thể hiển thị: Tên sách chứa ký tự rác '{kyTu}'!" });
+                    }
+                }
+
+                // Vượt qua kiểm tra -> Cho phép hiển thị
+                sach.HienThi = true;
                 sach.TrangThaiAI = "Hop_Le";
             }
             else
             {
+                // Nếu sách đang hiển thị, Admin muốn TẮT đi thì cho phép tắt thoải mái
+                sach.HienThi = false;
                 sach.TrangThaiAI = "Da_An_Thu_Cong";
             }
 
