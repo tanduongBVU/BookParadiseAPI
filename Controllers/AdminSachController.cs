@@ -73,7 +73,7 @@ namespace BookParadise.Controllers
             if (!sach.HienThi)
             {
                 // Chốt chặn 1: Không cho phép giá âm
-                if (sach.Gia < 0)
+                if (sach.Gia <= 0)
                 {
                     return BadRequest(new { message = "Không thể hiển thị: Sản phẩm đang có giá âm!" });
                 }
